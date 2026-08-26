@@ -146,7 +146,7 @@ jobs:
         with:
           path: source
           combine: true
-          sdk: given
+          sdk: 5.9.0
           target: Win64
           export-pdb: true
           build-config: RelWithDebInfo
