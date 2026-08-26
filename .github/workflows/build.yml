@@ -19,17 +19,45 @@ jobs:
           rm -rf .git
           rsync -a --exclude '.github' ./ ../jukebox-source/
 
-      - name: Apply Range downloader
-        working-directory: jukebox-source
+            - name: Apply Range downloader
+        working-directory: source
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("jukebox/download/hosted.cpp")
+          files = list(Path(".").rglob("hosted.cpp"))
+
+          if not files:
+              print("ERROR: hosted.cpp not found")
+              print("Files containing 'download':")
+              for p in Path(".").rglob("*"):
+                  if "download" in str(p).lower():
+                      print(p)
+              raise SystemExit(1)
+
+          print("Found hosted.cpp:")
+          for p in files:
+              print("  ", p)
+
+          p = files[0]
           s = p.read_text()
 
-          start = s.index("arc::Future<Result<ByteVector>> startHostedDownload")
-          brace = s.index("{", start)
+          marker = "startHostedDownload"
+          pos = s.find(marker)
+
+          if pos == -1:
+              raise RuntimeError("startHostedDownload was not found")
+
+          start = s.rfind("arc::Future", 0, pos)
+
+          if start == -1:
+              raise RuntimeError("Could not find function start")
+
+          brace = s.find("{", pos)
+
+          if brace == -1:
+              raise RuntimeError("Could not find function body")
+
           depth = 0
           end = None
 
@@ -43,7 +71,7 @@ jobs:
                       break
 
           if end is None:
-              raise RuntimeError("Could not find end of startHostedDownload")
+              raise RuntimeError("Could not find function end")
 
           replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
               int timeout = Mod::get()->getSettingValue<int>("download-timeout");
@@ -51,6 +79,7 @@ jobs:
 
               constexpr size_t CHUNK_SIZE = 10000;
               constexpr int MAX_RETRIES = 3;
+
               const auto requestTimeout = std::chrono::seconds(timeout);
               const std::string urlString(url);
 
@@ -67,14 +96,17 @@ jobs:
               }
 
               const auto length = head.header("Content-Length");
+
               if (!length) {
                   co_return Err("Server did not provide Content-Length");
               }
 
               size_t total = 0;
+
               try {
                   total = std::stoull(std::string(*length));
-              } catch (...) {
+              }
+              catch (...) {
                   co_return Err("Invalid Content-Length");
               }
 
@@ -82,8 +114,11 @@ jobs:
               result.reserve(total);
 
               for (size_t start = 0; start < total; start += CHUNK_SIZE) {
-                  const size_t end = std::min(start + CHUNK_SIZE - 1, total - 1);
+                  const size_t end =
+                      std::min(start + CHUNK_SIZE - 1, total - 1);
+
                   const size_t expected = end - start + 1;
+
                   bool success = false;
 
                   for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
@@ -94,12 +129,16 @@ jobs:
                               .downloadRange({start, end})
                               .get(urlString);
 
-                      if (response.code() != 206) continue;
+                      if (response.code() != 206)
+                          continue;
 
                       const auto& data = response.data();
-                      if (data.size() != expected) continue;
+
+                      if (data.size() != expected)
+                          continue;
 
                       result.insert(result.end(), data.begin(), data.end());
+
                       success = true;
 
                       const float progress =
@@ -107,7 +146,10 @@ jobs:
                           static_cast<float>(total);
 
                       events::FileDownloadProgress(urlString).send(
-                          events::FileDownloadProgressData{urlString, progress}
+                          events::FileDownloadProgressData{
+                              urlString,
+                              progress
+                          }
                       );
 
                       break;
@@ -122,7 +164,9 @@ jobs:
           }'''
 
           p.write_text(s[:start] + replacement + s[end:])
-          print(f"Patched {p}")
+
+          print("")
+          print("SUCCESS: patched", p)
           PY
 
       - name: Build Geode mod
