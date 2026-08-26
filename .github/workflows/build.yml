@@ -142,10 +142,11 @@ jobs:
       - name: Build Geode mod
         uses: geode-sdk/build-geode-mod@main
         with:
+          path: source
           combine: true
           sdk: given
           build-config: Release
-
+          
       - name: Upload Geode
         uses: actions/upload-artifact@v4
         with:
