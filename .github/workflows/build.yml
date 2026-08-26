@@ -5,10 +5,11 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: windows-latest
 
     steps:
       - name: Download Jukebox v3.6.2
+        shell: bash
         run: |
           git clone https://github.com/Fleeym/jukebox.git source
           cd source
@@ -16,8 +17,9 @@ jobs:
 
       - name: Apply Range downloader
         working-directory: source
+        shell: bash
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           from pathlib import Path
 
           files = list(Path(".").rglob("hosted.cpp"))
@@ -145,10 +147,12 @@ jobs:
           path: source
           combine: true
           sdk: given
-          build-config: Release
-          
+          target: Win64
+          export-pdb: true
+          build-config: RelWithDebInfo
+
       - name: Upload Geode
         uses: actions/upload-artifact@v4
         with:
-          name: jukebox-range-fix
-          path: build/*.geode
+          name: jukebox-range-fix-windows
+          path: source/build/*.geode
