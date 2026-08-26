@@ -5,73 +5,111 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
+      - name: Checkout fix repository
         uses: actions/checkout@v4
 
       - name: Download Jukebox v3.6.2
         run: |
-          git clone https://github.com/Fleeym/jukebox.git jukebox
-          cd jukebox
-          git checkout e01e8728a855c095efc2ae1047a6570a32ca4297
+          git clone https://github.com/Fleeym/jukebox.git source
+          cd source
+          git checkout e01e872
+          rm -rf .git
+          rsync -a --exclude '.github' ./ ../jukebox-source/
 
       - name: Apply Range downloader
+        working-directory: jukebox-source
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("jukebox/jukebox/download/hosted.cpp")
+          p = Path("jukebox/download/hosted.cpp")
           s = p.read_text()
 
           start = s.index("arc::Future<Result<ByteVector>> startHostedDownload")
-          end = s.index("\n}", start) + 2
+          brace = s.index("{", start)
+          depth = 0
+          end = None
+
+          for i in range(brace, len(s)):
+              if s[i] == "{":
+                  depth += 1
+              elif s[i] == "}":
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+
+          if end is None:
+              raise RuntimeError("Could not find end of startHostedDownload")
 
           replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
+              int timeout = Mod::get()->getSettingValue<int>("download-timeout");
+              if (timeout < 30) timeout = 30;
+
               constexpr size_t CHUNK_SIZE = 10000;
               constexpr int MAX_RETRIES = 3;
+              const auto requestTimeout = std::chrono::seconds(timeout);
+              const std::string urlString(url);
 
-              auto request = web::WebRequest()
-                  .transferBody(false)
-                  .get(std::string(url));
-
-              auto head = co_await request;
+              const web::WebResponse head =
+                  co_await web::WebRequest()
+                      .timeout(requestTimeout)
+                      .transferBody(false)
+                      .get(urlString);
 
               if (!head.ok()) {
-                  co_return Err("Failed to get file information");
+                  std::string err = utils::web::getErrorFromResponse(head);
+                  log::error("File download failed while reading headers. Error: {}", err);
+                  co_return Err(std::move(err));
               }
 
-              auto length = head.header("Content-Length");
+              const auto length = head.header("Content-Length");
               if (!length) {
                   co_return Err("Server did not provide Content-Length");
               }
 
-              size_t total = std::stoull(std::string(*length));
+              size_t total = 0;
+              try {
+                  total = std::stoull(std::string(*length));
+              } catch (...) {
+                  co_return Err("Invalid Content-Length");
+              }
+
               ByteVector result;
               result.reserve(total);
 
               for (size_t start = 0; start < total; start += CHUNK_SIZE) {
-                  size_t end = std::min(start + CHUNK_SIZE - 1, total - 1);
-                  size_t expected = end - start + 1;
-
+                  const size_t end = std::min(start + CHUNK_SIZE - 1, total - 1);
+                  const size_t expected = end - start + 1;
                   bool success = false;
 
                   for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
-                      auto response = co_await web::WebRequest()
-                          .downloadRange({start, end})
-                          .get(std::string(url));
+                      const web::WebResponse response =
+                          co_await web::WebRequest()
+                              .timeout(requestTimeout)
+                              .header("Accept-Encoding", "identity")
+                              .downloadRange({start, end})
+                              .get(urlString);
 
-                      if (response.code() != 206)
-                          continue;
+                      if (response.code() != 206) continue;
 
-                      auto data = response.data();
-
-                      if (data.size() != expected)
-                          continue;
+                      const auto& data = response.data();
+                      if (data.size() != expected) continue;
 
                       result.insert(result.end(), data.begin(), data.end());
                       success = true;
+
+                      const float progress =
+                          static_cast<float>(result.size()) /
+                          static_cast<float>(total);
+
+                      events::FileDownloadProgress(urlString).send(
+                          events::FileDownloadProgressData{urlString, progress}
+                      );
+
                       break;
                   }
 
@@ -81,17 +119,21 @@ jobs:
               }
 
               co_return Ok(std::move(result));
-          }''';
+          }'''
 
           p.write_text(s[:start] + replacement + s[end:])
+          print(f"Patched {p}")
           PY
 
-      - name: Build
+      - name: Build Geode mod
         uses: geode-sdk/build-geode-mod@main
         with:
+          export-pdb: false
           combine: true
+          sdk: 'given'
+          build-config: Release
 
-      - name: Upload Geode
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: jukebox-range-fix
