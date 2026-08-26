@@ -25,7 +25,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          p = Path("jukebox/jukebox/jukebox/download/hosted.cpp")
+          p = Path("jukebox/download/hosted.cpp")
           s = p.read_text()
 
           start = s.index("arc::Future<Result<ByteVector>> startHostedDownload")
