@@ -141,6 +141,31 @@ jobs:
           print("SUCCESS: patched", p)
           PY
 
+      - name: Set Geode version to 5.9.0
+        working-directory: source
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("mod.json")
+
+          if not path.exists():
+              raise RuntimeError("mod.json not found")
+
+          data = json.loads(path.read_text())
+
+          old_version = data.get("geode")
+          data["geode"] = "5.9.0"
+
+          path.write_text(
+              json.dumps(data, indent=4, ensure_ascii=False) + "\n"
+          )
+
+          print(f"Geode version: {old_version} -> {data['geode']}")
+          PY
+
       - name: Build Geode mod
         uses: geode-sdk/build-geode-mod@main
         with:
