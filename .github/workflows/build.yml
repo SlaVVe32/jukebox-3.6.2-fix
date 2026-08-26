@@ -1,1 +1,98 @@
+name: Build Jukebox Range Fix
 
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Jukebox v3.6.2
+        run: |
+          git clone https://github.com/Fleeym/jukebox.git jukebox
+          cd jukebox
+          git checkout e01e8728a855c095efc2ae1047a6570a32ca4297
+
+      - name: Apply Range downloader
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("jukebox/jukebox/download/hosted.cpp")
+          s = p.read_text()
+
+          start = s.index("arc::Future<Result<ByteVector>> startHostedDownload")
+          end = s.index("\n}", start) + 2
+
+          replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
+              constexpr size_t CHUNK_SIZE = 10000;
+              constexpr int MAX_RETRIES = 3;
+
+              auto request = web::WebRequest()
+                  .transferBody(false)
+                  .get(std::string(url));
+
+              auto head = co_await request;
+
+              if (!head.ok()) {
+                  co_return Err("Failed to get file information");
+              }
+
+              auto length = head.header("Content-Length");
+              if (!length) {
+                  co_return Err("Server did not provide Content-Length");
+              }
+
+              size_t total = std::stoull(std::string(*length));
+              ByteVector result;
+              result.reserve(total);
+
+              for (size_t start = 0; start < total; start += CHUNK_SIZE) {
+                  size_t end = std::min(start + CHUNK_SIZE - 1, total - 1);
+                  size_t expected = end - start + 1;
+
+                  bool success = false;
+
+                  for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
+                      auto response = co_await web::WebRequest()
+                          .downloadRange({start, end})
+                          .get(std::string(url));
+
+                      if (response.code() != 206)
+                          continue;
+
+                      auto data = response.data();
+
+                      if (data.size() != expected)
+                          continue;
+
+                      result.insert(result.end(), data.begin(), data.end());
+                      success = true;
+                      break;
+                  }
+
+                  if (!success) {
+                      co_return Err("Failed to download file chunk");
+                  }
+              }
+
+              co_return Ok(std::move(result));
+          }''';
+
+          p.write_text(s[:start] + replacement + s[end:])
+          PY
+
+      - name: Build
+        uses: geode-sdk/build-geode-mod@main
+        with:
+          combine: true
+
+      - name: Upload Geode
+        uses: actions/upload-artifact@v4
+        with:
+          name: jukebox-range-fix
+          path: build/*.geode
