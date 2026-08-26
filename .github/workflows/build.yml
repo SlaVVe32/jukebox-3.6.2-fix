@@ -8,18 +8,13 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout fix repository
-        uses: actions/checkout@v4
-
       - name: Download Jukebox v3.6.2
         run: |
           git clone https://github.com/Fleeym/jukebox.git source
           cd source
           git checkout e01e872
-          rm -rf .git
-          rsync -a --exclude '.github' ./ ../jukebox-source/
 
-            - name: Apply Range downloader
+      - name: Apply Range downloader
         working-directory: source
         run: |
           python3 - <<'PY'
@@ -27,17 +22,12 @@ jobs:
 
           files = list(Path(".").rglob("hosted.cpp"))
 
-          if not files:
-              print("ERROR: hosted.cpp not found")
-              print("Files containing 'download':")
-              for p in Path(".").rglob("*"):
-                  if "download" in str(p).lower():
-                      print(p)
-              raise SystemExit(1)
-
           print("Found hosted.cpp:")
           for p in files:
               print("  ", p)
+
+          if not files:
+              raise RuntimeError("hosted.cpp not found")
 
           p = files[0]
           s = p.read_text()
@@ -46,17 +36,13 @@ jobs:
           pos = s.find(marker)
 
           if pos == -1:
-              raise RuntimeError("startHostedDownload was not found")
+              raise RuntimeError("startHostedDownload not found")
 
           start = s.rfind("arc::Future", 0, pos)
-
-          if start == -1:
-              raise RuntimeError("Could not find function start")
-
           brace = s.find("{", pos)
 
-          if brace == -1:
-              raise RuntimeError("Could not find function body")
+          if start == -1 or brace == -1:
+              raise RuntimeError("Could not locate function")
 
           depth = 0
           end = None
@@ -71,7 +57,7 @@ jobs:
                       break
 
           if end is None:
-              raise RuntimeError("Could not find function end")
+              raise RuntimeError("Could not locate function end")
 
           replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
               int timeout = Mod::get()->getSettingValue<int>("download-timeout");
@@ -90,9 +76,7 @@ jobs:
                       .get(urlString);
 
               if (!head.ok()) {
-                  std::string err = utils::web::getErrorFromResponse(head);
-                  log::error("File download failed while reading headers. Error: {}", err);
-                  co_return Err(std::move(err));
+                  co_return Err(utils::web::getErrorFromResponse(head));
               }
 
               const auto length = head.header("Content-Length");
@@ -118,7 +102,6 @@ jobs:
                       std::min(start + CHUNK_SIZE - 1, total - 1);
 
                   const size_t expected = end - start + 1;
-
                   bool success = false;
 
                   for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
@@ -138,19 +121,7 @@ jobs:
                           continue;
 
                       result.insert(result.end(), data.begin(), data.end());
-
                       success = true;
-
-                      const float progress =
-                          static_cast<float>(result.size()) /
-                          static_cast<float>(total);
-
-                      events::FileDownloadProgress(urlString).send(
-                          events::FileDownloadProgressData{
-                              urlString,
-                              progress
-                          }
-                      );
 
                       break;
                   }
@@ -165,19 +136,17 @@ jobs:
 
           p.write_text(s[:start] + replacement + s[end:])
 
-          print("")
           print("SUCCESS: patched", p)
           PY
 
       - name: Build Geode mod
         uses: geode-sdk/build-geode-mod@main
         with:
-          export-pdb: false
           combine: true
-          sdk: 'given'
+          sdk: given
           build-config: Release
 
-      - name: Upload build artifacts
+      - name: Upload Geode
         uses: actions/upload-artifact@v4
         with:
           name: jukebox-range-fix
