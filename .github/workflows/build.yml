@@ -71,35 +71,110 @@ jobs:
               const auto requestTimeout = std::chrono::seconds(timeout);
               const std::string urlString(url);
 
-              const web::WebResponse head =
+              // First request one byte to determine whether the server
+              // supports HTTP range requests and to obtain the total size.
+              web::WebResponse probe =
                   co_await web::WebRequest()
                       .timeout(requestTimeout)
-                      .transferBody(false)
+                      .header("Accept-Encoding", "identity")
+                      .downloadRange({0, 0})
                       .get(urlString);
 
-              if (!head.ok()) {
-                  co_return Err(utils::web::getErrorFromResponse(head));
+              if (!probe.ok()) {
+                  co_return Err(utils::web::getErrorFromResponse(probe));
               }
 
-              const auto length = head.header("Content-Length");
-
-              if (!length) {
-                  co_return Err("Server did not provide Content-Length");
-              }
-
+              // A proper range response contains:
+              //
+              // Content-Range: bytes 0-0/TOTAL
+              //
+              // Use it instead of relying on HEAD/Content-Length.
               size_t total = 0;
+              bool rangeSupported = false;
 
-              try {
-                  total = std::stoull(std::string(*length));
+              if (auto contentRange = probe.header("Content-Range")) {
+                  const std::string range(*contentRange);
+
+                  const auto slash = range.rfind('/');
+
+                  if (slash != std::string::npos && slash + 1 < range.size()) {
+                      try {
+                          const auto totalString = range.substr(slash + 1);
+
+                          if (totalString != "*") {
+                              total = std::stoull(totalString);
+                              rangeSupported = total > 0;
+                          }
+                      }
+                      catch (...) {
+                          rangeSupported = false;
+                      }
+                  }
               }
-              catch (...) {
-                  co_return Err("Invalid Content-Length");
+
+              // Some servers ignore Range and return the complete file.
+              // In that case we can simply use the response we already got.
+              if (probe.code() == 200 && !rangeSupported) {
+                  const auto& data = probe.data();
+
+                  if (!data.empty()) {
+                      co_return Ok(ByteVector(data.begin(), data.end()));
+                  }
+              }
+
+              // If the server did not provide Content-Range, try
+              // Content-Length from the actual GET response.
+              if (!rangeSupported) {
+                  if (auto length = probe.header("Content-Length")) {
+                      try {
+                          total = std::stoull(std::string(*length));
+                          rangeSupported = total > 0;
+                      }
+                      catch (...) {
+                          rangeSupported = false;
+                      }
+                  }
+              }
+
+              // Last-resort fallback: download the complete file.
+              if (!rangeSupported) {
+                  web::WebResponse response =
+                      co_await web::WebRequest()
+                          .timeout(requestTimeout)
+                          .header("Accept-Encoding", "identity")
+                          .get(urlString);
+
+                  if (!response.ok()) {
+                      co_return Err(utils::web::getErrorFromResponse(response));
+                  }
+
+                  const auto& data = response.data();
+
+                  if (data.empty()) {
+                      co_return Err("Server returned an empty file");
+                  }
+
+                  co_return Ok(ByteVector(data.begin(), data.end()));
               }
 
               ByteVector result;
               result.reserve(total);
 
-              for (size_t start = 0; start < total; start += CHUNK_SIZE) {
+              // The probe already downloaded byte 0.
+              const auto& firstData = probe.data();
+
+              if (firstData.size() != 1) {
+                  // Some servers return more than one byte despite Range.
+                  if (firstData.size() >= total) {
+                      co_return Ok(ByteVector(firstData.begin(), firstData.end()));
+                  }
+
+                  co_return Err("Invalid initial range response");
+              }
+
+              result.insert(result.end(), firstData.begin(), firstData.end());
+
+              for (size_t start = 1; start < total; start += CHUNK_SIZE) {
                   const size_t end =
                       std::min(start + CHUNK_SIZE - 1, total - 1);
 
@@ -131,6 +206,10 @@ jobs:
                   if (!success) {
                       co_return Err("Failed to download file chunk");
                   }
+              }
+
+              if (result.size() != total) {
+                  co_return Err("Downloaded file size does not match expected size");
               }
 
               co_return Ok(std::move(result));
