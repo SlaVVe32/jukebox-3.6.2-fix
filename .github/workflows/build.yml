@@ -24,15 +24,22 @@ jobs:
 
           files = list(Path(".").rglob("hosted.cpp"))
 
-          print("Found hosted.cpp:")
+          print("Searching for hosted.cpp...")
+
+          if not files:
+              print("ERROR: hosted.cpp not found")
+              print("Possible download-related files:")
+              for p in Path(".").rglob("*"):
+                  if "download" in str(p).lower():
+                      print("  ", p)
+              raise SystemExit(1)
+
+          print("Found:")
           for p in files:
               print("  ", p)
 
-          if not files:
-              raise RuntimeError("hosted.cpp not found")
-
           p = files[0]
-          s = p.read_text()
+          s = p.read_text(encoding="utf-8")
 
           marker = "startHostedDownload"
           pos = s.find(marker)
@@ -41,10 +48,14 @@ jobs:
               raise RuntimeError("startHostedDownload not found")
 
           start = s.rfind("arc::Future", 0, pos)
+
+          if start == -1:
+              raise RuntimeError("Could not find function declaration")
+
           brace = s.find("{", pos)
 
-          if start == -1 or brace == -1:
-              raise RuntimeError("Could not locate function")
+          if brace == -1:
+              raise RuntimeError("Could not find function body")
 
           depth = 0
           end = None
@@ -54,16 +65,18 @@ jobs:
                   depth += 1
               elif s[i] == "}":
                   depth -= 1
+
                   if depth == 0:
                       end = i + 1
                       break
 
           if end is None:
-              raise RuntimeError("Could not locate function end")
+              raise RuntimeError("Could not find function end")
 
           replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
               int timeout = Mod::get()->getSettingValue<int>("download-timeout");
-              if (timeout < 30) timeout = 30;
+              if (timeout < 30)
+                  timeout = 30;
 
               constexpr size_t CHUNK_SIZE = 10000;
               constexpr int MAX_RETRIES = 3;
@@ -71,9 +84,8 @@ jobs:
               const auto requestTimeout = std::chrono::seconds(timeout);
               const std::string urlString(url);
 
-              // First request one byte to determine whether the server
-              // supports HTTP range requests and to obtain the total size.
-              web::WebResponse probe =
+              // Request the first byte to determine the total file size.
+              const web::WebResponse probe =
                   co_await web::WebRequest()
                       .timeout(requestTimeout)
                       .header("Accept-Encoding", "identity")
@@ -84,37 +96,42 @@ jobs:
                   co_return Err(utils::web::getErrorFromResponse(probe));
               }
 
-              // A proper range response contains:
-              //
-              // Content-Range: bytes 0-0/TOTAL
-              //
-              // Use it instead of relying on HEAD/Content-Length.
               size_t total = 0;
-              bool rangeSupported = false;
 
               if (auto contentRange = probe.header("Content-Range")) {
                   const std::string range(*contentRange);
-
                   const auto slash = range.rfind('/');
 
-                  if (slash != std::string::npos && slash + 1 < range.size()) {
+                  if (slash != std::string::npos &&
+                      slash + 1 < range.size()) {
                       try {
                           const auto totalString = range.substr(slash + 1);
 
                           if (totalString != "*") {
                               total = std::stoull(totalString);
-                              rangeSupported = total > 0;
                           }
                       }
                       catch (...) {
-                          rangeSupported = false;
+                          total = 0;
                       }
                   }
               }
 
-              // Some servers ignore Range and return the complete file.
-              // In that case we can simply use the response we already got.
-              if (probe.code() == 200 && !rangeSupported) {
+              // If Content-Range was unavailable, try Content-Length.
+              if (total == 0) {
+                  if (auto length = probe.header("Content-Length")) {
+                      try {
+                          total = std::stoull(std::string(*length));
+                      }
+                      catch (...) {
+                          total = 0;
+                      }
+                  }
+              }
+
+              // If the server ignored Range and returned the whole file,
+              // use that response directly.
+              if (probe.code() == 200) {
                   const auto& data = probe.data();
 
                   if (!data.empty()) {
@@ -122,53 +139,17 @@ jobs:
                   }
               }
 
-              // If the server did not provide Content-Range, try
-              // Content-Length from the actual GET response.
-              if (!rangeSupported) {
-                  if (auto length = probe.header("Content-Length")) {
-                      try {
-                          total = std::stoull(std::string(*length));
-                          rangeSupported = total > 0;
-                      }
-                      catch (...) {
-                          rangeSupported = false;
-                      }
-                  }
-              }
-
-              // Last-resort fallback: download the complete file.
-              if (!rangeSupported) {
-                  web::WebResponse response =
-                      co_await web::WebRequest()
-                          .timeout(requestTimeout)
-                          .header("Accept-Encoding", "identity")
-                          .get(urlString);
-
-                  if (!response.ok()) {
-                      co_return Err(utils::web::getErrorFromResponse(response));
-                  }
-
-                  const auto& data = response.data();
-
-                  if (data.empty()) {
-                      co_return Err("Server returned an empty file");
-                  }
-
-                  co_return Ok(ByteVector(data.begin(), data.end()));
+              if (total == 0) {
+                  co_return Err("Could not determine file size");
               }
 
               ByteVector result;
               result.reserve(total);
 
-              // The probe already downloaded byte 0.
+              // The probe should contain byte 0.
               const auto& firstData = probe.data();
 
               if (firstData.size() != 1) {
-                  // Some servers return more than one byte despite Range.
-                  if (firstData.size() >= total) {
-                      co_return Ok(ByteVector(firstData.begin(), firstData.end()));
-                  }
-
                   co_return Err("Invalid initial range response");
               }
 
@@ -179,9 +160,13 @@ jobs:
                       std::min(start + CHUNK_SIZE - 1, total - 1);
 
                   const size_t expected = end - start + 1;
+
                   bool success = false;
 
-                  for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
+                  for (int attempt = 0;
+                       attempt < MAX_RETRIES;
+                       ++attempt) {
+
                       const web::WebResponse response =
                           co_await web::WebRequest()
                               .timeout(requestTimeout)
@@ -197,9 +182,13 @@ jobs:
                       if (data.size() != expected)
                           continue;
 
-                      result.insert(result.end(), data.begin(), data.end());
-                      success = true;
+                      result.insert(
+                          result.end(),
+                          data.begin(),
+                          data.end()
+                      );
 
+                      success = true;
                       break;
                   }
 
@@ -215,34 +204,13 @@ jobs:
               co_return Ok(std::move(result));
           }'''
 
-          p.write_text(s[:start] + replacement + s[end:])
-
-          print("SUCCESS: patched", p)
-          PY
-
-      - name: Set Geode version to 5.9.0
-        working-directory: source
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          path = Path("mod.json")
-
-          if not path.exists():
-              raise RuntimeError("mod.json not found")
-
-          data = json.loads(path.read_text())
-
-          old_version = data.get("geode")
-          data["geode"] = "5.9.0"
-
-          path.write_text(
-              json.dumps(data, indent=4, ensure_ascii=False) + "\n"
+          p.write_text(
+              s[:start] + replacement + s[end:],
+              encoding="utf-8"
           )
 
-          print(f"Geode version: {old_version} -> {data['geode']}")
+          print("")
+          print("SUCCESS: patched", p)
           PY
 
       - name: Build Geode mod
@@ -250,13 +218,20 @@ jobs:
         with:
           path: source
           combine: true
-          sdk: 5.9.0
+          sdk: given
           target: Win64
           export-pdb: true
           build-config: RelWithDebInfo
+
+      - name: Find built Geode
+        shell: bash
+        run: |
+          echo "Searching for .geode files..."
+          find source -type f -name "*.geode" -print
 
       - name: Upload Geode
         uses: actions/upload-artifact@v4
         with:
           name: jukebox-range-fix-windows
-          path: source/build/*.geode
+          path: source/**/*.geode
+          if-no-files-found: error
