@@ -2,6 +2,9 @@ name: Build Jukebox Range Fix
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - range-fix-final
 
 jobs:
   build:
@@ -18,199 +21,49 @@ jobs:
       - name: Apply Range downloader
         working-directory: source
         shell: bash
+        env:
+          HOSTED_CPP_B64: I2luY2x1ZGUgPGp1a2Vib3gvZG93bmxvYWQvaG9zdGVkLmhwcD4KCiNpbmNsdWRlIDxhbGdvcml0aG0+CiNpbmNsdWRlIDxjaHJvbm8+CiNpbmNsdWRlIDxzdHJpbmc+CiNpbmNsdWRlIDxzdHJpbmdfdmlldz4KCiNpbmNsdWRlIDxmbXQvY29yZS5oPgojaW5jbHVkZSA8R2VvZGUvUmVzdWx0LmhwcD4KI2luY2x1ZGUgPEdlb2RlL2xvYWRlci9Nb2QuaHBwPgojaW5jbHVkZSA8R2VvZGUvdXRpbHMvd2ViLmhwcD4KCiNpbmNsdWRlIDxqdWtlYm94L2V2ZW50cy9maWxlX2Rvd25sb2FkX3Byb2dyZXNzLmhwcD4KI2luY2x1ZGUgPGp1a2Vib3gvdXRpbHMvd2ViLmhwcD4KCnVzaW5nIG5hbWVzcGFjZSBnZW9kZTo6cHJlbHVkZTsKCm5hbWVzcGFjZSBqdWtlYm94Ojpkb3dubG9hZCB7CgphcmM6OkZ1dHVyZTxSZXN1bHQ8Qnl0ZVZlY3Rvcj4+IHN0YXJ0SG9zdGVkRG93bmxvYWQoY29uc3Qgc3RkOjpzdHJpbmdfdmlldyB1cmwpIHsKICAgIGludCB0aW1lb3V0ID0gTW9kOjpnZXQoKS0+Z2V0U2V0dGluZ1ZhbHVlPGludD4oImRvd25sb2FkLXRpbWVvdXQiKTsKCiAgICBpZiAodGltZW91dCA8IDMwKSB7CiAgICAgICAgdGltZW91dCA9IDMwOwogICAgfQoKICAgIGNvbnN0ZXhwciBzaXplX3QgQ0hVTktfU0laRSA9IDEwMDAwOwogICAgY29uc3RleHByIGludCBNQVhfUkVUUklFUyA9IDM7CgogICAgY29uc3QgYXV0byByZXF1ZXN0VGltZW91dCA9IHN0ZDo6Y2hyb25vOjpzZWNvbmRzKHRpbWVvdXQpOwogICAgY29uc3Qgc3RkOjpzdHJpbmcgdXJsU3RyaW5nKHVybCk7CgogICAgY29uc3Qgd2ViOjpXZWJSZXNwb25zZSBwcm9iZSA9CiAgICAgICAgY29fYXdhaXQgd2ViOjpXZWJSZXF1ZXN0KCkKICAgICAgICAgICAgLnRpbWVvdXQocmVxdWVzdFRpbWVvdXQpCiAgICAgICAgICAgIC5oZWFkZXIoIkFjY2VwdC1FbmNvZGluZyIsICJpZGVudGl0eSIpCiAgICAgICAgICAgIC5kb3dubG9hZFJhbmdlKHswLCAwfSkKICAgICAgICAgICAgLmdldCh1cmxTdHJpbmcpOwoKICAgIGlmICghcHJvYmUub2soKSkgewogICAgICAgIHN0ZDo6c3RyaW5nIGVyciA9IHV0aWxzOjp3ZWI6OmdldEVycm9yRnJvbVJlc3BvbnNlKHByb2JlKTsKICAgICAgICBsb2c6OmVycm9yKCJGaWxlIGRvd25sb2FkIGZhaWxlZCB3aGlsZSBwcm9iaW5nLiBFcnJvcjoge30iLCBlcnIpOwogICAgICAgIGNvX3JldHVybiBFcnIoc3RkOjptb3ZlKGVycikpOwogICAgfQoKICAgIC8vIElmIFJhbmdlIHdhcyBpZ25vcmVkIGFuZCB0aGUgc2VydmVyIHJldHVybmVkIHRoZSB3aG9sZSBvYmplY3QsCiAgICAvLyB1c2UgdGhhdCByZXNwb25zZSBkaXJlY3RseS4KICAgIGlmIChwcm9iZS5jb2RlKCkgPT0gMjAwICYmICFwcm9iZS5kYXRhKCkuZW1wdHkoKSkgewogICAgICAgIGNvX3JldHVybiBPayhCeXRlVmVjdG9yKHByb2JlLmRhdGEoKS5iZWdpbigpLCBwcm9iZS5kYXRhKCkuZW5kKCkpKTsKICAgIH0KCiAgICBzaXplX3QgdG90YWwgPSAwOwoKICAgIGlmIChhdXRvIGNvbnRlbnRSYW5nZSA9IHByb2JlLmhlYWRlcigiQ29udGVudC1SYW5nZSIpKSB7CiAgICAgICAgY29uc3Qgc3RkOjpzdHJpbmcgcmFuZ2UoKmNvbnRlbnRSYW5nZSk7CiAgICAgICAgY29uc3QgYXV0byBzbGFzaCA9IHJhbmdlLnJmaW5kKCcvJyk7CgogICAgICAgIGlmIChzbGFzaCAhPSBzdGQ6OnN0cmluZzo6bnBvcyAmJiBzbGFzaCArIDEgPCByYW5nZS5zaXplKCkpIHsKICAgICAgICAgICAgdHJ5IHsKICAgICAgICAgICAgICAgIGNvbnN0IGF1dG8gdG90YWxTdHJpbmcgPSByYW5nZS5zdWJzdHIoc2xhc2ggKyAxKTsKICAgICAgICAgICAgICAgIGlmICh0b3RhbFN0cmluZyAhPSAiKiIpIHsKICAgICAgICAgICAgICAgICAgICB0b3RhbCA9IHN0ZDo6c3RvdWxsKHRvdGFsU3RyaW5nKTsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgICAgICBjYXRjaCAoLi4uKSB7CiAgICAgICAgICAgICAgICB0b3RhbCA9IDA7CiAgICAgICAgICAgIH0KICAgICAgICB9CiAgICB9CgogICAgaWYgKHRvdGFsID09IDApIHsKICAgICAgICBpZiAoYXV0byBsZW5ndGggPSBwcm9iZS5oZWFkZXIoIkNvbnRlbnQtTGVuZ3RoIikpIHsKICAgICAgICAgICAgdHJ5IHsKICAgICAgICAgICAgICAgIHRvdGFsID0gc3RkOjpzdG91bGwoc3RkOjpzdHJpbmcoKmxlbmd0aCkpOwogICAgICAgICAgICB9CiAgICAgICAgICAgIGNhdGNoICguLi4pIHsKICAgICAgICAgICAgICAgIHRvdGFsID0gMDsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0KCiAgICBpZiAodG90YWwgPT0gMCkgewogICAgICAgIGNvX3JldHVybiBFcnIoIkNvdWxkIG5vdCBkZXRlcm1pbmUgaG9zdGVkIGZpbGUgc2l6ZSIpOwogICAgfQoKICAgIGNvbnN0IGF1dG8mIGZpcnN0RGF0YSA9IHByb2JlLmRhdGEoKTsKCiAgICBpZiAoZmlyc3REYXRhLnNpemUoKSAhPSAxKSB7CiAgICAgICAgY29fcmV0dXJuIEVycigiSW52YWxpZCBpbml0aWFsIHJhbmdlIHJlc3BvbnNlIik7CiAgICB9CgogICAgQnl0ZVZlY3RvciByZXN1bHQ7CiAgICByZXN1bHQucmVzZXJ2ZSh0b3RhbCk7CiAgICByZXN1bHQuaW5zZXJ0KHJlc3VsdC5lbmQoKSwgZmlyc3REYXRhLmJlZ2luKCksIGZpcnN0RGF0YS5lbmQoKSk7CgogICAgZXZlbnRzOjpGaWxlRG93bmxvYWRQcm9ncmVzcyh1cmxTdHJpbmcpLnNlbmQoCiAgICAgICAgZXZlbnRzOjpGaWxlRG93bmxvYWRQcm9ncmVzc0RhdGF7CiAgICAgICAgICAgIHVybFN0cmluZywKICAgICAgICAgICAgc3RhdGljX2Nhc3Q8ZmxvYXQ+KHJlc3VsdC5zaXplKCkpIC8gc3RhdGljX2Nhc3Q8ZmxvYXQ+KHRvdGFsKQogICAgICAgIH0KICAgICk7CgogICAgZm9yIChzaXplX3Qgc3RhcnQgPSAxOyBzdGFydCA8IHRvdGFsOyBzdGFydCArPSBDSFVOS19TSVpFKSB7CiAgICAgICAgY29uc3Qgc2l6ZV90IGVuZCA9IHN0ZDo6bWluKHN0YXJ0ICsgQ0hVTktfU0laRSAtIDEsIHRvdGFsIC0gMSk7CiAgICAgICAgY29uc3Qgc2l6ZV90IGV4cGVjdGVkID0gZW5kIC0gc3RhcnQgKyAxOwoKICAgICAgICBib29sIHN1Y2Nlc3MgPSBmYWxzZTsKCiAgICAgICAgZm9yIChpbnQgYXR0ZW1wdCA9IDA7IGF0dGVtcHQgPCBNQVhfUkVUUklFUzsgKythdHRlbXB0KSB7CiAgICAgICAgICAgIGNvbnN0IHdlYjo6V2ViUmVzcG9uc2UgcmVzcG9uc2UgPQogICAgICAgICAgICAgICAgY29fYXdhaXQgd2ViOjpXZWJSZXF1ZXN0KCkKICAgICAgICAgICAgICAgICAgICAudGltZW91dChyZXF1ZXN0VGltZW91dCkKICAgICAgICAgICAgICAgICAgICAuaGVhZGVyKCJBY2NlcHQtRW5jb2RpbmciLCAiaWRlbnRpdHkiKQogICAgICAgICAgICAgICAgICAgIC5kb3dubG9hZFJhbmdlKHtzdGFydCwgZW5kfSkKICAgICAgICAgICAgICAgICAgICAuZ2V0KHVybFN0cmluZyk7CgogICAgICAgICAgICBpZiAocmVzcG9uc2UuY29kZSgpICE9IDIwNikgewogICAgICAgICAgICAgICAgY29udGludWU7CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIGNvbnN0IGF1dG8mIGRhdGEgPSByZXNwb25zZS5kYXRhKCk7CgogICAgICAgICAgICBpZiAoZGF0YS5zaXplKCkgIT0gZXhwZWN0ZWQpIHsKICAgICAgICAgICAgICAgIGNvbnRpbnVlOwogICAgICAgICAgICB9CgogICAgICAgICAgICByZXN1bHQuaW5zZXJ0KHJlc3VsdC5lbmQoKSwgZGF0YS5iZWdpbigpLCBkYXRhLmVuZCgpKTsKICAgICAgICAgICAgc3VjY2VzcyA9IHRydWU7CgogICAgICAgICAgICBldmVudHM6OkZpbGVEb3dubG9hZFByb2dyZXNzKHVybFN0cmluZykuc2VuZCgKICAgICAgICAgICAgICAgIGV2ZW50czo6RmlsZURvd25sb2FkUHJvZ3Jlc3NEYXRhewogICAgICAgICAgICAgICAgICAgIHVybFN0cmluZywKICAgICAgICAgICAgICAgICAgICBzdGF0aWNfY2FzdDxmbG9hdD4ocmVzdWx0LnNpemUoKSkgLyBzdGF0aWNfY2FzdDxmbG9hdD4odG90YWwpCiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICk7CgogICAgICAgICAgICBicmVhazsKICAgICAgICB9CgogICAgICAgIGlmICghc3VjY2VzcykgewogICAgICAgICAgICBsb2c6OmVycm9yKCJGYWlsZWQgdG8gZG93bmxvYWQgaG9zdGVkIGZpbGUgcmFuZ2Uge30te30iLCBzdGFydCwgZW5kKTsKICAgICAgICAgICAgY29fcmV0dXJuIEVycigiRmFpbGVkIHRvIGRvd25sb2FkIGZpbGUgY2h1bmsiKTsKICAgICAgICB9CiAgICB9CgogICAgaWYgKHJlc3VsdC5zaXplKCkgIT0gdG90YWwpIHsKICAgICAgICBjb19yZXR1cm4gRXJyKCJEb3dubG9hZGVkIGZpbGUgc2l6ZSBkb2VzIG5vdCBtYXRjaCBleHBlY3RlZCBzaXplIik7CiAgICB9CgogICAgZXZlbnRzOjpGaWxlRG93bmxvYWRQcm9ncmVzcyh1cmxTdHJpbmcpLnNlbmQoCiAgICAgICAgZXZlbnRzOjpGaWxlRG93bmxvYWRQcm9ncmVzc0RhdGF7dXJsU3RyaW5nLCAxLjBmfQogICAgKTsKCiAgICBjb19yZXR1cm4gT2soc3RkOjptb3ZlKHJlc3VsdCkpOwp9Cgp9ICAvLyBuYW1lc3BhY2UganVrZWJveDo6ZG93bmxvYWQK
         run: |
           python - <<'PY'
+          import base64
+          import os
           from pathlib import Path
 
-          files = list(Path(".").rglob("hosted.cpp"))
+          path = Path("jukebox/jukebox/download/hosted.cpp")
 
-          print("Searching for hosted.cpp...")
+          if not path.exists():
+              raise RuntimeError(f"Missing source file: {path}")
 
-          if not files:
-              print("ERROR: hosted.cpp not found")
-              print("Possible download-related files:")
-              for p in Path(".").rglob("*"):
-                  if "download" in str(p).lower():
-                      print("  ", p)
-              raise SystemExit(1)
+          replacement = base64.b64decode(
+              os.environ["HOSTED_CPP_B64"]
+          ).decode("utf-8")
 
-          print("Found:")
-          for p in files:
-              print("  ", p)
+          path.write_text(replacement, encoding="utf-8")
+          print(f"SUCCESS: replaced {path}")
+          PY
 
-          p = files[0]
-          s = p.read_text(encoding="utf-8")
+      - name: Verify original Geode version
+        working-directory: source
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-          marker = "startHostedDownload"
-          pos = s.find(marker)
+          data = json.loads(Path("mod.json").read_text(encoding="utf-8"))
 
-          if pos == -1:
-              raise RuntimeError("startHostedDownload not found")
+          if data.get("geode") != "5.3.0":
+              raise RuntimeError(
+                  f"Expected Geode 5.3.0, got {data.get('geode')!r}"
+              )
 
-          start = s.rfind("arc::Future", 0, pos)
+          if data.get("version") != "3.6.2":
+              raise RuntimeError(
+                  f"Expected Jukebox 3.6.2, got {data.get('version')!r}"
+              )
 
-          if start == -1:
-              raise RuntimeError("Could not find function declaration")
-
-          brace = s.find("{", pos)
-
-          if brace == -1:
-              raise RuntimeError("Could not find function body")
-
-          depth = 0
-          end = None
-
-          for i in range(brace, len(s)):
-              if s[i] == "{":
-                  depth += 1
-              elif s[i] == "}":
-                  depth -= 1
-
-                  if depth == 0:
-                      end = i + 1
-                      break
-
-          if end is None:
-              raise RuntimeError("Could not find function end")
-
-          replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
-              int timeout = Mod::get()->getSettingValue<int>("download-timeout");
-              if (timeout < 30)
-                  timeout = 30;
-
-              constexpr size_t CHUNK_SIZE = 10000;
-              constexpr int MAX_RETRIES = 3;
-
-              const auto requestTimeout = std::chrono::seconds(timeout);
-              const std::string urlString(url);
-
-              // Request the first byte to determine the total file size.
-              const web::WebResponse probe =
-                  co_await web::WebRequest()
-                      .timeout(requestTimeout)
-                      .header("Accept-Encoding", "identity")
-                      .downloadRange({0, 0})
-                      .get(urlString);
-
-              if (!probe.ok()) {
-                  co_return Err(utils::web::getErrorFromResponse(probe));
-              }
-
-              size_t total = 0;
-
-              if (auto contentRange = probe.header("Content-Range")) {
-                  const std::string range(*contentRange);
-                  const auto slash = range.rfind('/');
-
-                  if (slash != std::string::npos &&
-                      slash + 1 < range.size()) {
-                      try {
-                          const auto totalString = range.substr(slash + 1);
-
-                          if (totalString != "*") {
-                              total = std::stoull(totalString);
-                          }
-                      }
-                      catch (...) {
-                          total = 0;
-                      }
-                  }
-              }
-
-              // If Content-Range was unavailable, try Content-Length.
-              if (total == 0) {
-                  if (auto length = probe.header("Content-Length")) {
-                      try {
-                          total = std::stoull(std::string(*length));
-                      }
-                      catch (...) {
-                          total = 0;
-                      }
-                  }
-              }
-
-              // If the server ignored Range and returned the whole file,
-              // use that response directly.
-              if (probe.code() == 200) {
-                  const auto& data = probe.data();
-
-                  if (!data.empty()) {
-                      co_return Ok(ByteVector(data.begin(), data.end()));
-                  }
-              }
-
-              if (total == 0) {
-                  co_return Err("Could not determine file size");
-              }
-
-              ByteVector result;
-              result.reserve(total);
-
-              // The probe should contain byte 0.
-              const auto& firstData = probe.data();
-
-              if (firstData.size() != 1) {
-                  co_return Err("Invalid initial range response");
-              }
-
-              result.insert(result.end(), firstData.begin(), firstData.end());
-
-              for (size_t start = 1; start < total; start += CHUNK_SIZE) {
-                  const size_t end =
-                      std::min(start + CHUNK_SIZE - 1, total - 1);
-
-                  const size_t expected = end - start + 1;
-
-                  bool success = false;
-
-                  for (int attempt = 0;
-                       attempt < MAX_RETRIES;
-                       ++attempt) {
-
-                      const web::WebResponse response =
-                          co_await web::WebRequest()
-                              .timeout(requestTimeout)
-                              .header("Accept-Encoding", "identity")
-                              .downloadRange({start, end})
-                              .get(urlString);
-
-                      if (response.code() != 206)
-                          continue;
-
-                      const auto& data = response.data();
-
-                      if (data.size() != expected)
-                          continue;
-
-                      result.insert(
-                          result.end(),
-                          data.begin(),
-                          data.end()
-                      );
-
-                      success = true;
-                      break;
-                  }
-
-                  if (!success) {
-                      co_return Err("Failed to download file chunk");
-                  }
-              }
-
-              if (result.size() != total) {
-                  co_return Err("Downloaded file size does not match expected size");
-              }
-
-              co_return Ok(std::move(result));
-          }'''
-
-          p.write_text(
-              s[:start] + replacement + s[end:],
-              encoding="utf-8"
-          )
-
-          print("")
-          print("SUCCESS: patched", p)
+          print("Geode SDK:", data["geode"])
+          print("Jukebox:", data["version"])
           PY
 
       - name: Build Geode mod
@@ -223,10 +76,10 @@ jobs:
           export-pdb: true
           build-config: RelWithDebInfo
 
-      - name: Find built Geode
+      - name: Show build output
         shell: bash
         run: |
-          echo "Searching for .geode files..."
+          echo "Built .geode files:"
           find source -type f -name "*.geode" -print
 
       - name: Upload Geode
