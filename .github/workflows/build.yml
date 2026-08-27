@@ -19,18 +19,16 @@ jobs:
         working-directory: source
         shell: bash
         run: |
-          test -f mod.json
-          test -f jukebox/jukebox/download/hosted.cpp
-
-          echo "Jukebox source:"
+          echo "=== Jukebox commit ==="
           git rev-parse HEAD
 
-          echo "Geode version:"
-          python -c "import json; print(json.load(open('mod.json'))['geode'])"
+          echo "=== mod.json ==="
+          cat mod.json
 
-          echo "hosted.cpp:"
-          pwd
-          ls -l jukebox/jukebox/download/hosted.cpp
+          echo "=== Find hosted.cpp ==="
+          find . -name hosted.cpp -print
+
+          test -f jukebox/jukebox/download/hosted.cpp
 
       - name: Apply Range downloader fix
         working-directory: source
@@ -42,7 +40,7 @@ jobs:
           path = Path("jukebox/jukebox/download/hosted.cpp")
 
           if not path.exists():
-              raise RuntimeError(f"File not found: {path}")
+              raise RuntimeError(f"hosted.cpp not found: {path}")
 
           text = path.read_text(encoding="utf-8")
 
@@ -51,12 +49,16 @@ jobs:
           start = text.find(marker)
 
           if start == -1:
-              raise RuntimeError("startHostedDownload was not found")
+              raise RuntimeError(
+                  "startHostedDownload was not found in hosted.cpp"
+              )
 
           brace = text.find("{", start)
 
           if brace == -1:
-              raise RuntimeError("Could not find function body")
+              raise RuntimeError(
+                  "Could not find start of startHostedDownload body"
+              )
 
           depth = 0
           end = None
@@ -66,15 +68,19 @@ jobs:
                   depth += 1
               elif text[i] == "}":
                   depth -= 1
+
                   if depth == 0:
                       end = i + 1
                       break
 
           if end is None:
-              raise RuntimeError("Could not find function end")
+              raise RuntimeError(
+                  "Could not find end of startHostedDownload"
+              )
 
-          replacement = '''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
-              int timeout = Mod::get()->getSettingValue<int>("download-timeout");
+          replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
+              int timeout =
+                  Mod::get()->getSettingValue<int>("download-timeout");
 
               if (timeout < 30) {
                   timeout = 30;
@@ -83,10 +89,13 @@ jobs:
               constexpr size_t CHUNK_SIZE = 10000;
               constexpr int MAX_RETRIES = 3;
 
-              const auto requestTimeout = std::chrono::seconds(timeout);
+              const auto requestTimeout =
+                  std::chrono::seconds(timeout);
+
               const std::string urlString(url);
 
-              web::WebResponse probe =
+              // Probe the server with a one-byte range request.
+              const web::WebResponse probe =
                   co_await web::WebRequest()
                       .timeout(requestTimeout)
                       .header("Accept-Encoding", "identity")
@@ -94,21 +103,26 @@ jobs:
                       .get(urlString);
 
               if (!probe.ok()) {
-                  std::string err =
+                  std::string error =
                       utils::web::getErrorFromResponse(probe);
 
                   log::error(
-                      "File download failed while probing server. Error: {}",
-                      err
+                      "File download failed while probing server: {}",
+                      error
                   );
 
-                  co_return Err(std::move(err));
+                  co_return Err(std::move(error));
               }
 
               size_t total = 0;
 
-              if (auto contentRange = probe.header("Content-Range")) {
+              // Try to determine the total file size from
+              // Content-Range.
+              if (auto contentRange =
+                      probe.header("Content-Range")) {
+
                   const std::string range(*contentRange);
+
                   const auto slash = range.rfind('/');
 
                   if (
@@ -116,10 +130,12 @@ jobs:
                       slash + 1 < range.size()
                   ) {
                       try {
-                          const auto totalString = range.substr(slash + 1);
+                          const auto totalString =
+                              range.substr(slash + 1);
 
                           if (totalString != "*") {
-                              total = std::stoull(totalString);
+                              total =
+                                  std::stoull(totalString);
                           }
                       }
                       catch (...) {
@@ -128,20 +144,30 @@ jobs:
                   }
               }
 
+              // Some servers ignore Range and return the whole file.
               if (probe.code() == 200 && total == 0) {
                   const auto& data = probe.data();
 
                   if (!data.empty()) {
                       co_return Ok(
-                          ByteVector(data.begin(), data.end())
+                          ByteVector(
+                              data.begin(),
+                              data.end()
+                          )
                       );
                   }
               }
 
+              // Try Content-Length if Content-Range was unavailable.
               if (total == 0) {
-                  if (auto length = probe.header("Content-Length")) {
+                  if (auto length =
+                          probe.header("Content-Length")) {
+
                       try {
-                          total = std::stoull(std::string(*length));
+                          total =
+                              std::stoull(
+                                  std::string(*length)
+                              );
                       }
                       catch (...) {
                           total = 0;
@@ -149,28 +175,39 @@ jobs:
                   }
               }
 
+              // Last-resort full download.
               if (total == 0) {
-                  web::WebResponse response =
+                  const web::WebResponse response =
                       co_await web::WebRequest()
                           .timeout(requestTimeout)
-                          .header("Accept-Encoding", "identity")
+                          .header(
+                              "Accept-Encoding",
+                              "identity"
+                          )
                           .get(urlString);
 
                   if (!response.ok()) {
-                      std::string err =
-                          utils::web::getErrorFromResponse(response);
+                      std::string error =
+                          utils::web::getErrorFromResponse(
+                              response
+                          );
 
-                      co_return Err(std::move(err));
+                      co_return Err(std::move(error));
                   }
 
                   const auto& data = response.data();
 
                   if (data.empty()) {
-                      co_return Err("Server returned an empty file");
+                      co_return Err(
+                          "Server returned an empty file"
+                      );
                   }
 
                   co_return Ok(
-                      ByteVector(data.begin(), data.end())
+                      ByteVector(
+                          data.begin(),
+                          data.end()
+                      )
                   );
               }
 
@@ -186,10 +223,13 @@ jobs:
                       );
                   }
 
-                  co_return Err("Invalid initial range response");
+                  co_return Err(
+                      "Invalid initial range response"
+                  );
               }
 
               ByteVector result;
+
               result.reserve(total);
 
               result.insert(
@@ -209,7 +249,9 @@ jobs:
                           total - 1
                       );
 
-                  const size_t expected = end - start + 1;
+                  const size_t expected =
+                      end - start + 1;
+
                   bool success = false;
 
                   for (
@@ -231,7 +273,8 @@ jobs:
                           continue;
                       }
 
-                      const auto& data = response.data();
+                      const auto& data =
+                          response.data();
 
                       if (data.size() != expected) {
                           continue;
@@ -246,10 +289,16 @@ jobs:
                       success = true;
 
                       const float progress =
-                          static_cast<float>(result.size()) /
-                          static_cast<float>(total);
+                          static_cast<float>(
+                              result.size()
+                          ) /
+                          static_cast<float>(
+                              total
+                          );
 
-                      events::FileDownloadProgress(urlString).send(
+                      events::FileDownloadProgress(
+                          urlString
+                      ).send(
                           events::FileDownloadProgressData{
                               urlString,
                               progress
@@ -260,21 +309,30 @@ jobs:
                   }
 
                   if (!success) {
-                      co_return Err("Failed to download file chunk");
+                      co_return Err(
+                          "Failed to download file chunk"
+                      );
                   }
               }
 
               if (result.size() != total) {
                   co_return Err(
-                      "Downloaded file size does not match expected size"
+                      "Downloaded file size does not "
+                      "match expected size"
                   );
               }
 
               co_return Ok(std::move(result));
           }'''
 
+          patched = (
+              text[:start]
+              + replacement
+              + text[end:]
+          )
+
           path.write_text(
-              text[:start] + replacement + text[end:],
+              patched,
               encoding="utf-8"
           )
 
@@ -282,26 +340,91 @@ jobs:
           print(path)
           PY
 
-      - name: Verify patch
+      - name: Verify Range patch
         working-directory: source
         shell: bash
         run: |
-          grep -n "startHostedDownload" jukebox/jukebox/download/hosted.cpp
-          grep -n "downloadRange" jukebox/jukebox/download/hosted.cpp
+          echo "=== startHostedDownload ==="
+          grep -n "startHostedDownload" \
+            jukebox/jukebox/download/hosted.cpp
+
+          echo "=== downloadRange ==="
+          grep -n "downloadRange" \
+            jukebox/jukebox/download/hosted.cpp
+
+      - name: Set Geode version
+        working-directory: source
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("mod.json")
+
+          data = json.loads(
+              path.read_text(encoding="utf-8")
+          )
+
+          print(
+              "Original Geode requirement:",
+              data.get("geode")
+          )
+
+          # Keep the dependency information from the
+          # original Jukebox source unless it is absent.
+          if not data.get("geode"):
+              data["geode"] = "4.0.0"
+
+          path.write_text(
+              json.dumps(
+                  data,
+                  indent=4,
+                  ensure_ascii=False
+              ) + "\n",
+              encoding="utf-8"
+          )
+
+          print(
+              "Final Geode requirement:",
+              data.get("geode")
+          )
+          PY
+
+      - name: Remove bundled Geode SDK
+        shell: bash
+        run: |
+          if [ -d "geode-sdk-clone" ]; then
+            echo "Removing bundled geode-sdk-clone"
+            rm -rf geode-sdk-clone
+          fi
 
       - name: Build Geode mod
-        id: build
         uses: geode-sdk/build-geode-mod@main
         with:
           path: source
-          sdk: given
           target: Win64
           combine: true
           export-pdb: false
           build-config: Release
 
+      - name: Find generated Geode package
+        shell: bash
+        run: |
+          echo "=== Searching for .geode files ==="
+
+          find . \
+            -type f \
+            -name "*.geode" \
+            -print
+
       - name: Upload Geode
         uses: actions/upload-artifact@v4
         with:
           name: jukebox-range-fix-windows
-          path: output/*.geode
+          path: |
+            source/build/*.geode
+            source/*.geode
+            output/*.geode
+          if-no-files-found: error
+          
