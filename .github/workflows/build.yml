@@ -8,9 +8,6 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      # ------------------------------------------------------------
-      # 1. Download exact Jukebox v3.6.2
-      # ------------------------------------------------------------
       - name: Download Jukebox v3.6.2
         shell: bash
         run: |
@@ -18,9 +15,23 @@ jobs:
           cd source
           git checkout e01e872
 
-      # ------------------------------------------------------------
-      # 2. Apply HTTP Range downloader fix
-      # ------------------------------------------------------------
+      - name: Verify source
+        working-directory: source
+        shell: bash
+        run: |
+          test -f mod.json
+          test -f jukebox/jukebox/download/hosted.cpp
+
+          echo "Jukebox source:"
+          git rev-parse HEAD
+
+          echo "Geode version:"
+          python -c "import json; print(json.load(open('mod.json'))['geode'])"
+
+          echo "hosted.cpp:"
+          pwd
+          ls -l jukebox/jukebox/download/hosted.cpp
+
       - name: Apply Range downloader fix
         working-directory: source
         shell: bash
@@ -28,72 +39,41 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
-          files = list(Path(".").rglob("hosted.cpp"))
+          path = Path("jukebox/jukebox/download/hosted.cpp")
 
-          print("Searching for hosted.cpp...")
+          if not path.exists():
+              raise RuntimeError(f"File not found: {path}")
 
-          for p in files:
-              print("Found:", p)
+          text = path.read_text(encoding="utf-8")
 
-          if not files:
-              raise RuntimeError("hosted.cpp not found")
+          marker = "arc::Future<Result<ByteVector>> startHostedDownload"
 
-          # Prefer the actual Jukebox source file.
-          preferred = [
-              p for p in files
-              if str(p).replace("\\", "/").endswith(
-                  "jukebox/jukebox/download/hosted.cpp"
-              )
-          ]
-
-          p = preferred[0] if preferred else files[0]
-
-          print("Patching:", p)
-
-          s = p.read_text(encoding="utf-8")
-
-          marker = "startHostedDownload"
-          pos = s.find(marker)
-
-          if pos == -1:
-              raise RuntimeError(
-                  "startHostedDownload not found in hosted.cpp"
-              )
-
-          start = s.rfind("arc::Future", 0, pos)
+          start = text.find(marker)
 
           if start == -1:
-              raise RuntimeError(
-                  "Could not locate start of startHostedDownload"
-              )
+              raise RuntimeError("startHostedDownload was not found")
 
-          brace = s.find("{", pos)
+          brace = text.find("{", start)
 
           if brace == -1:
-              raise RuntimeError(
-                  "Could not locate function body"
-              )
+              raise RuntimeError("Could not find function body")
 
           depth = 0
           end = None
 
-          for i in range(brace, len(s)):
-              if s[i] == "{":
+          for i in range(brace, len(text)):
+              if text[i] == "{":
                   depth += 1
-
-              elif s[i] == "}":
+              elif text[i] == "}":
                   depth -= 1
-
                   if depth == 0:
                       end = i + 1
                       break
 
           if end is None:
-              raise RuntimeError(
-                  "Could not locate end of startHostedDownload"
-              )
+              raise RuntimeError("Could not find function end")
 
-          replacement = r'''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
+          replacement = '''arc::Future<Result<ByteVector>> startHostedDownload(const std::string_view url) {
               int timeout = Mod::get()->getSettingValue<int>("download-timeout");
 
               if (timeout < 30) {
@@ -103,15 +83,9 @@ jobs:
               constexpr size_t CHUNK_SIZE = 10000;
               constexpr int MAX_RETRIES = 3;
 
-              const auto requestTimeout =
-                  std::chrono::seconds(timeout);
-
+              const auto requestTimeout = std::chrono::seconds(timeout);
               const std::string urlString(url);
 
-              // First request byte 0.
-              //
-              // This allows us to detect whether the server supports
-              // HTTP range requests and obtain the total file size.
               web::WebResponse probe =
                   co_await web::WebRequest()
                       .timeout(requestTimeout)
@@ -132,17 +106,9 @@ jobs:
               }
 
               size_t total = 0;
-              bool rangeSupported = false;
 
-              // Expected format:
-              //
-              // Content-Range: bytes 0-0/TOTAL
-              //
-              if (auto contentRange =
-                      probe.header("Content-Range")) {
-
+              if (auto contentRange = probe.header("Content-Range")) {
                   const std::string range(*contentRange);
-
                   const auto slash = range.rfind('/');
 
                   if (
@@ -150,79 +116,49 @@ jobs:
                       slash + 1 < range.size()
                   ) {
                       try {
-                          const auto totalString =
-                              range.substr(slash + 1);
+                          const auto totalString = range.substr(slash + 1);
 
                           if (totalString != "*") {
-                              total =
-                                  std::stoull(totalString);
-
-                              rangeSupported =
-                                  total > 0;
+                              total = std::stoull(totalString);
                           }
                       }
                       catch (...) {
-                          rangeSupported = false;
+                          total = 0;
                       }
                   }
               }
 
-              // Some servers ignore Range and return the entire file.
-              //
-              // If that happens, use the data we already received.
-              if (
-                  probe.code() == 200 &&
-                  !rangeSupported
-              ) {
+              if (probe.code() == 200 && total == 0) {
                   const auto& data = probe.data();
 
                   if (!data.empty()) {
                       co_return Ok(
-                          ByteVector(
-                              data.begin(),
-                              data.end()
-                          )
+                          ByteVector(data.begin(), data.end())
                       );
                   }
               }
 
-              // If Content-Range wasn't supplied, try Content-Length.
-              if (!rangeSupported) {
-                  if (auto length =
-                          probe.header("Content-Length")) {
-
+              if (total == 0) {
+                  if (auto length = probe.header("Content-Length")) {
                       try {
-                          total =
-                              std::stoull(
-                                  std::string(*length)
-                              );
-
-                          rangeSupported =
-                              total > 0;
+                          total = std::stoull(std::string(*length));
                       }
                       catch (...) {
-                          rangeSupported = false;
+                          total = 0;
                       }
                   }
               }
 
-              // Last-resort fallback:
-              // download the complete file normally.
-              if (!rangeSupported) {
+              if (total == 0) {
                   web::WebResponse response =
                       co_await web::WebRequest()
                           .timeout(requestTimeout)
-                          .header(
-                              "Accept-Encoding",
-                              "identity"
-                          )
+                          .header("Accept-Encoding", "identity")
                           .get(urlString);
 
                   if (!response.ok()) {
                       std::string err =
-                          utils::web::getErrorFromResponse(
-                              response
-                          );
+                          utils::web::getErrorFromResponse(response);
 
                       co_return Err(std::move(err));
                   }
@@ -230,28 +166,17 @@ jobs:
                   const auto& data = response.data();
 
                   if (data.empty()) {
-                      co_return Err(
-                          "Server returned an empty file"
-                      );
+                      co_return Err("Server returned an empty file");
                   }
 
                   co_return Ok(
-                      ByteVector(
-                          data.begin(),
-                          data.end()
-                      )
+                      ByteVector(data.begin(), data.end())
                   );
               }
 
-              ByteVector result;
-              result.reserve(total);
-
-              // The probe already downloaded byte 0.
               const auto& firstData = probe.data();
 
               if (firstData.size() != 1) {
-                  // If the server returned the complete file despite
-                  // the range request, accept it.
                   if (firstData.size() >= total) {
                       co_return Ok(
                           ByteVector(
@@ -261,10 +186,11 @@ jobs:
                       );
                   }
 
-                  co_return Err(
-                      "Invalid initial range response"
-                  );
+                  co_return Err("Invalid initial range response");
               }
+
+              ByteVector result;
+              result.reserve(total);
 
               result.insert(
                   result.end(),
@@ -272,7 +198,6 @@ jobs:
                   firstData.end()
               );
 
-              // Download the rest in small HTTP range requests.
               for (
                   size_t start = 1;
                   start < total;
@@ -284,9 +209,7 @@ jobs:
                           total - 1
                       );
 
-                  const size_t expected =
-                      end - start + 1;
-
+                  const size_t expected = end - start + 1;
                   bool success = false;
 
                   for (
@@ -308,8 +231,7 @@ jobs:
                           continue;
                       }
 
-                      const auto& data =
-                          response.data();
+                      const auto& data = response.data();
 
                       if (data.size() != expected) {
                           continue;
@@ -323,18 +245,11 @@ jobs:
 
                       success = true;
 
-                      // Report progress.
                       const float progress =
-                          static_cast<float>(
-                              result.size()
-                          ) /
-                          static_cast<float>(
-                              total
-                          );
+                          static_cast<float>(result.size()) /
+                          static_cast<float>(total);
 
-                      events::FileDownloadProgress(
-                          urlString
-                      ).send(
+                      events::FileDownloadProgress(urlString).send(
                           events::FileDownloadProgressData{
                               urlString,
                               progress
@@ -345,9 +260,7 @@ jobs:
                   }
 
                   if (!success) {
-                      co_return Err(
-                          "Failed to download file chunk"
-                      );
+                      co_return Err("Failed to download file chunk");
                   }
               }
 
@@ -357,190 +270,27 @@ jobs:
                   );
               }
 
-              co_return Ok(
-                  std::move(result)
-              );
+              co_return Ok(std::move(result));
           }'''
 
-          patched = s[:start] + replacement + s[end:]
-
-          p.write_text(
-              patched,
+          path.write_text(
+              text[:start] + replacement + text[end:],
               encoding="utf-8"
           )
 
-          print("SUCCESS: Range downloader patched.")
-          print("File:", p)
+          print("SUCCESS: hosted.cpp patched")
+          print(path)
           PY
 
-      # ------------------------------------------------------------
-      # 3. Fix duplicate init() declaration in Geode SDK
-      #
-      # The current SDK source used by the build action can contain:
-      #
-      #     bool init();
-      #
-      # and later:
-      #
-      #     virtual bool init();
-      #
-      # Clang treats this as a redeclaration error.
-      # ------------------------------------------------------------
-      - name: Fix Geode SDK duplicate init declaration
+      - name: Verify patch
+        working-directory: source
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
+          grep -n "startHostedDownload" jukebox/jukebox/download/hosted.cpp
+          grep -n "downloadRange" jukebox/jukebox/download/hosted.cpp
 
-          candidates = list(
-              Path(".").rglob("CCFileUtilsWin32.h")
-          )
-
-          print("Searching for CCFileUtilsWin32.h...")
-
-          for p in candidates:
-              print("Found:", p)
-
-          if not candidates:
-              raise RuntimeError(
-                  "CCFileUtilsWin32.h not found"
-              )
-
-          fixed = False
-
-          for p in candidates:
-              text = p.read_text(
-                  encoding="utf-8",
-                  errors="ignore"
-              )
-
-              # Only modify the Geode SDK copy.
-              normalized = str(p).replace("\\", "/")
-
-              if "geode-sdk-clone" not in normalized:
-                  continue
-
-              old = """    bool init();
-    virtual void addSearchPath(const char* path);
-    virtual void removeSearchPath(const char* path);
-    virtual gd::string getWritablePath();
-    virtual gd::string getWritablePath2();
-    virtual bool isFileExist(const gd::string& strFilePath);
-    virtual bool isAbsolutePath(const gd::string& strPath);
-
-    virtual bool init();
-"""
-
-              new = """    bool init();
-    virtual void addSearchPath(const char* path);
-    virtual void removeSearchPath(const char* path);
-    virtual gd::string getWritablePath();
-    virtual gd::string getWritablePath2();
-    virtual bool isFileExist(const gd::string& strFilePath);
-    virtual bool isAbsolutePath(const gd::string& strPath);
-"""
-
-              if old in text:
-                  text = text.replace(
-                      old,
-                      new,
-                      1
-                  )
-
-                  p.write_text(
-                      text,
-                      encoding="utf-8"
-                  )
-
-                  print(
-                      "SUCCESS: removed duplicate init() from",
-                      p
-                  )
-
-                  fixed = True
-                  break
-
-              # If the exact surrounding text differs,
-              # remove only the second declaration.
-              lines = text.splitlines(
-                  keepends=True
-              )
-
-              init_indices = [
-                  i
-                  for i, line in enumerate(lines)
-                  if line.strip() in (
-                      "bool init();",
-                      "virtual bool init();"
-                  )
-              ]
-
-              if len(init_indices) >= 2:
-                  second = init_indices[1]
-
-                  if lines[second].strip() == "virtual bool init();":
-                      del lines[second]
-
-                      p.write_text(
-                          "".join(lines),
-                          encoding="utf-8"
-                      )
-
-                      print(
-                          "SUCCESS: removed duplicate virtual init() from",
-                          p
-                      )
-
-                      fixed = True
-                      break
-
-          if not fixed:
-              raise RuntimeError(
-                  "Could not find duplicate init() declaration"
-              )
-          PY
-
-      # ------------------------------------------------------------
-      # 4. Show exactly which SDK header is being used
-      # ------------------------------------------------------------
-      - name: Verify SDK header
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          files = list(
-              Path(".").rglob("CCFileUtilsWin32.h")
-          )
-
-          for p in files:
-              if "geode-sdk-clone" not in str(p).replace("\\", "/"):
-                  continue
-
-              print("")
-              print("===== SDK HEADER =====")
-              print(p)
-              print("======================")
-
-              text = p.read_text(
-                  encoding="utf-8",
-                  errors="ignore"
-              )
-
-              for i, line in enumerate(
-                  text.splitlines(),
-                  1
-              ):
-                  if "init();" in line:
-                      print(
-                          f"{i}: {line}"
-                      )
-          PY
-
-      # ------------------------------------------------------------
-      # 5. Build using the Geode version specified by mod.json
-      # ------------------------------------------------------------
       - name: Build Geode mod
+        id: build
         uses: geode-sdk/build-geode-mod@main
         with:
           path: source
@@ -550,13 +300,8 @@ jobs:
           export-pdb: false
           build-config: Release
 
-      # ------------------------------------------------------------
-      # 6. Upload resulting .geode
-      # ------------------------------------------------------------
       - name: Upload Geode
         uses: actions/upload-artifact@v4
         with:
           name: jukebox-range-fix-windows
-          path: |
-            output/*.geode
-            source/build/*.geode
+          path: output/*.geode
